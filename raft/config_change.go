@@ -169,6 +169,17 @@ func (s *nodeState) removeUnvotingServer(id types.ServerID) (configEntry, bool) 
 	return entry, found
 }
 
+// getUnvotingServerIDs returns a snapshot of the current unvoting server IDs.
+func (s *nodeState) getUnvotingServerIDs() []types.ServerID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]types.ServerID, 0, len(s.unvotingServers))
+	for id := range s.unvotingServers {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ---- RaftNode configuration helpers --------------------------------
 
 // handleConfigurationMessages is the goroutine that processes membership RPCs.

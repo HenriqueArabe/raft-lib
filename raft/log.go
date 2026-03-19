@@ -3,6 +3,7 @@ package raft
 import (
 	"fmt"
 	"math"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -15,16 +16,18 @@ import (
 // Triggers a snapshot if the array is full.
 // mu must NOT be held; the method acquires it internally.
 // Returns the new log index on success, or -1 on failure.
-func (s *nodeState) addCommandLog(id types.ServerID, data []byte) int {
+func (s *nodeState) addCommandLog(id types.ServerID, clientID string, seqNum int64, data []byte) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	lastIdx, _ := s.getLastLogIdxTerm()
 	entry := types.RaftLog{
-		Index: lastIdx + 1,
-		Term:  s.currentTerm,
-		Type:  types.LogCommand,
-		Data:  data,
+		Index:    lastIdx + 1,
+		Term:     s.currentTerm,
+		Type:     types.LogCommand,
+		Data:     data,
+		ClientID: clientID,
+		SeqNum:   seqNum,
 	}
 
 	if s.nextLogIdx >= logArrayCapacity {
@@ -294,15 +297,40 @@ func (s *nodeState) getLog(i int) types.RaftLog {
 
 // sendAppendEntriesRPCs sends AppendEntries to all current voting peers.
 // Also sends to unvoting (joining) peers so they catch up.
-// TODO: Session 3 — implement connection iteration.
 func (n *RaftNode) sendAppendEntriesRPCs() {
-	// TODO: Session 3 — iterate n.connections and n.unvotingConnections,
-	// call n.state.getAppendEntriesArgs(id) and n.transport.SendAppendEntries.
-	// If getAppendEntriesArgs returns nil, call sendInstallSnapshotRPC instead.
+	const aeTimeout = 200 * time.Millisecond
+
+	send := func(peer types.ServerID) {
+		args := n.state.getAppendEntriesArgs(peer)
+		if args == nil {
+			// Peer is behind the last snapshot; InstallSnapshot handles it (Session 4).
+			n.sendInstallSnapshotRPC(peer)
+			return
+		}
+		go func() {
+			resp, err := n.transport.SendAppendEntries(peer, args)
+			if err != nil {
+				log.Debugf("AppendEntries to %s: %v", peer, err)
+				return
+			}
+			select {
+			case n.myAEResponseChan <- resp:
+			case <-time.After(aeTimeout):
+				log.Warnf("AppendEntries response from %s not consumed (timeout)", peer)
+			case <-n.stopCh:
+			}
+		}()
+	}
+
+	for _, peer := range n.cfg.Peers {
+		send(peer)
+	}
+	for _, peer := range n.state.getUnvotingServerIDs() {
+		send(peer)
+	}
 }
 
 // handleAppendEntriesRPCResponses is the goroutine that drains myAEResponseChan.
-// TODO: Session 3 — implement.
 func (n *RaftNode) handleAppendEntriesRPCResponses() {
 	for {
 		select {
@@ -314,8 +342,10 @@ func (n *RaftNode) handleAppendEntriesRPCResponses() {
 			if needSnapshot {
 				n.sendInstallSnapshotRPC(resp.ID)
 			}
-			_ = matchIdx
-			// TODO: Session 3 — check unvoting promotion.
+			// If an unvoting server has caught up to the commit index, promote it.
+			if matchIdx >= 0 && matchIdx >= n.state.getCommitIndex() {
+				n.promoteUnvotingServer(resp.ID) // no-op if not an unvoting server
+			}
 		case <-n.stopCh:
 			return
 		}
@@ -328,6 +358,10 @@ func (n *RaftNode) applyLog(entry types.RaftLog) {
 	if entry.Type == types.LogCommand {
 		if err := n.sm.Apply(entry.Data); err != nil {
 			log.Errorf("StateMachine.Apply error: %v", err)
+		}
+		// Update deduplication tracking so replayed requests are detected.
+		if entry.ClientID != "" && entry.SeqNum > 0 {
+			n.state.setClientLastSeq(types.ServerID(entry.ClientID), entry.SeqNum)
 		}
 	}
 	// Signal pending command if we are the leader.

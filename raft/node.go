@@ -367,7 +367,6 @@ func (n *RaftNode) checkConfigurationsToStart() {
 }
 
 // handleApplyRequests is the goroutine that serialises client command submissions.
-// TODO: Session 3 — implement deduplication using clientLastSeq.
 func (n *RaftNode) handleApplyRequests() {
 	for {
 		select {
@@ -379,7 +378,14 @@ func (n *RaftNode) handleApplyRequests() {
 					LeaderID: n.state.getCurrentLeader(),
 				}
 			case Leader:
-				logIdx := n.state.addCommandLog(n.cfg.ID, req.args.Command)
+				// Deduplication: if this sequence number was already applied, respond immediately.
+				clientID := types.ServerID(req.args.ClientID)
+				if req.args.SeqNum > 0 && req.args.SeqNum <= n.state.getClientLastSeq(clientID) {
+					req.resultCh <- &types.ApplyResponse{Success: true, LeaderID: n.cfg.ID}
+					continue
+				}
+
+				logIdx := n.state.addCommandLog(n.cfg.ID, req.args.ClientID, req.args.SeqNum, req.args.Command)
 				if logIdx < 0 {
 					req.resultCh <- &types.ApplyResponse{Success: false, LeaderID: n.cfg.ID}
 					continue

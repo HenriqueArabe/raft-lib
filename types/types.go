@@ -27,11 +27,13 @@ type ConfigChange struct {
 // For LogCommand entries, Data holds the serialized application command.
 // For LogConfiguration entries, Config holds the membership change.
 type RaftLog struct {
-	Index  int
-	Term   int
-	Type   LogType
-	Data   []byte      // application payload (LogCommand)
-	Config ConfigChange // membership change (LogConfiguration)
+	Index    int
+	Term     int
+	Type     LogType
+	Data     []byte       // application payload (LogCommand)
+	Config   ConfigChange // membership change (LogConfiguration)
+	ClientID string       // client identifier for deduplication (LogCommand only)
+	SeqNum   int64        // monotonic sequence number for deduplication (LogCommand only)
 }
 
 // Config holds the startup configuration for a RaftNode.
