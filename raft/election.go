@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"time"
+
 	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/types"
@@ -125,8 +127,21 @@ func (s *nodeState) winElection(id types.ServerID) {
 
 // sendRequestVoteRPCs issues RequestVote RPCs to all voting peers in parallel.
 // Responses are routed to n.myVoteResponseChan.
-// TODO: Session 2 — fill connection iteration using n.transport.
 func (n *RaftNode) sendRequestVoteRPCs(args *types.RequestVoteArgs) {
-	// TODO: Session 2 — iterate connections, call n.transport.SendRequestVote
-	// asynchronously, send results to n.myVoteResponseChan.
+	for _, peer := range n.cfg.Peers {
+		peer := peer
+		go func() {
+			resp, err := n.transport.SendRequestVote(peer, args)
+			if err != nil {
+				log.Debugf("RequestVote to %s: %v", peer, err)
+				return
+			}
+			select {
+			case n.myVoteResponseChan <- resp:
+			case <-time.After(time.Duration(n.cfg.ElectionMinMs) * time.Millisecond):
+				log.Warnf("RequestVote response from %s not consumed", peer)
+			case <-n.stopCh:
+			}
+		}()
+	}
 }

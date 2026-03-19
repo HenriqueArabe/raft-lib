@@ -7,6 +7,7 @@ package raft
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -201,11 +202,11 @@ func (n *RaftNode) Start() error {
 		return fmt.Errorf("Start: listen: %w", err)
 	}
 
-	// Connect to peers.
-	// TODO: Session 5 — parallel connect with retry; signal connectedChan.
-	connected := len(n.cfg.Peers) == 0
-	if connected {
+	// Connect to peers in the background; signal connectedChan when all are up.
+	if len(n.cfg.Peers) == 0 {
 		n.connected = true
+	} else {
+		go n.connectToPeers()
 	}
 
 	// Launch background goroutines.
@@ -481,10 +482,6 @@ func (n *RaftNode) handleCandidate() {
 
 // handleLeader handles one iteration of the Leader select loop.
 func (n *RaftNode) handleLeader() {
-	heartbeat := types.Config{HeartbeatMs: n.cfg.HeartbeatMs}
-	_ = heartbeat
-
-	// TODO: Session 3 — use time.After(heartbeat interval) properly.
 	select {
 	case args := <-n.aeArgsChan:
 		resp := n.state.handleAppendEntries(n.cfg.ID, args)
@@ -502,11 +499,51 @@ func (n *RaftNode) handleLeader() {
 	case <-n.connectedChan:
 		n.connected = true
 
+	case <-time.After(time.Duration(n.cfg.HeartbeatMs) * time.Millisecond):
+		n.sendAppendEntriesRPCs()
+
 	case <-n.stopCh:
 		return
 	}
 
 	n.state.checkCommits()
+}
+
+// connectToPeers connects to every peer in parallel (with retry) and signals
+// connectedChan once all connections are established.
+func (n *RaftNode) connectToPeers() {
+	done := make(chan struct{}, len(n.cfg.Peers))
+	for _, peer := range n.cfg.Peers {
+		peer := peer
+		go func() {
+			for {
+				select {
+				case <-n.stopCh:
+					return
+				default:
+				}
+				if err := n.transport.Connect(peer); err != nil {
+					log.Debugf("Connect to %s: %v — retrying", peer, err)
+					time.Sleep(time.Second)
+					continue
+				}
+				log.Infof("Connected to peer %s", peer)
+				done <- struct{}{}
+				return
+			}
+		}()
+	}
+	for i := 0; i < len(n.cfg.Peers); i++ {
+		select {
+		case <-done:
+		case <-n.stopCh:
+			return
+		}
+	}
+	select {
+	case n.connectedChan <- struct{}{}:
+	case <-n.stopCh:
+	}
 }
 
 // Ensure RaftNode implements transport.TransportHandler at compile time.

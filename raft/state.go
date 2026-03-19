@@ -121,6 +121,8 @@ func newNodeState(
 		s.nextIndex[p] = 0
 		s.matchIndex[p] = -1
 		s.lastSentLogIndex[p] = -1
+		s.serverConfig[p] = true
+		s.oldServerConfig[p] = true
 	}
 	return s
 }
