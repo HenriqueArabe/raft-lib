@@ -12,7 +12,8 @@ import (
 // It signals n.snapshotRequestChan and waits for the state machine snapshot
 // on n.snapshotResponseChan (the RaftNode bridges those to the StateMachine).
 // Returns true if the snapshot succeeded.
-// TODO: Session 4 — full implementation.
+// Must be called with s.mu held. snapshotLoop does not acquire s.mu,
+// so the channel round-trip is safe while the lock is held.
 func (s *nodeState) takeSnapshot() bool {
 	// Ask the RaftNode to take a snapshot of the application state machine.
 	s.snapshotRequestChan <- struct{}{}
@@ -161,14 +162,25 @@ func (s *nodeState) purgeEntriesFromSnapshot(aea *types.AppendEntriesArgs) {
 // ---- RaftNode snapshot helpers ------------------------------------
 
 // sendInstallSnapshotRPC sends a snapshot to the given peer asynchronously.
-// TODO: Session 4 — implement response handling.
 func (n *RaftNode) sendInstallSnapshotRPC(target types.ServerID) {
-	// TODO: Session 4 — build args, call n.transport.SendInstallSnapshot,
-	// route response to n.myISResponseChan.
+	if n.state.getLastSnapshot() == nil {
+		return
+	}
+	args := n.state.prepareInstallSnapshotRPC(n.cfg.ID)
+	go func() {
+		resp, err := n.transport.SendInstallSnapshot(target, args)
+		if err != nil {
+			log.Debugf("InstallSnapshot to %s: %v", target, err)
+			return
+		}
+		select {
+		case n.myISResponseChan <- resp:
+		case <-n.stopCh:
+		}
+	}()
 }
 
 // handleInstallSnapshotResponses drains the InstallSnapshot response channel.
-// TODO: Session 4 — implement.
 func (n *RaftNode) handleInstallSnapshotResponses() {
 	for {
 		select {
@@ -176,8 +188,10 @@ func (n *RaftNode) handleInstallSnapshotResponses() {
 			if n.state.getRole() != Leader {
 				continue
 			}
-			_ = n.state.handleInstallSnapshotResponse(n.cfg.ID, resp)
-			// TODO: Session 4 — check unvoting promotion.
+			matchIdx := n.state.handleInstallSnapshotResponse(n.cfg.ID, resp)
+			if matchIdx >= 0 && matchIdx >= n.state.getCommitIndex() {
+				n.promoteUnvotingServer(resp.ID)
+			}
 		case <-n.stopCh:
 			return
 		}

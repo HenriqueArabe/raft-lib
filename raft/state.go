@@ -193,6 +193,18 @@ func (s *nodeState) setClientLastSeq(id types.ServerID, seq int64) {
 	s.clientLastSeq[id] = seq
 }
 
+func (s *nodeState) getLastSnapshot() *types.Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastSnapshot
+}
+
+func (s *nodeState) getLastConfigLogIndex() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastConfigLogIndex
+}
+
 // ---- Log array helpers ---------------------------------------------
 
 // getLastLogIdxTerm returns the index and term of the last log entry
