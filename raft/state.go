@@ -205,6 +205,19 @@ func (s *nodeState) getLastConfigLogIndex() int {
 	return s.lastConfigLogIndex
 }
 
+// getPersistentState returns a snapshot of the fields that must survive crashes.
+func (s *nodeState) getPersistentState() *types.PersistentState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	logs := make([]types.RaftLog, s.nextLogIdx)
+	copy(logs, s.logs[:s.nextLogIdx])
+	return &types.PersistentState{
+		CurrentTerm: s.currentTerm,
+		VotedFor:    s.votedFor,
+		Logs:        logs,
+	}
+}
+
 // ---- Log array helpers ---------------------------------------------
 
 // getLastLogIdxTerm returns the index and term of the last log entry

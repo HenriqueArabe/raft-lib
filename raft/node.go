@@ -73,6 +73,9 @@ type RaftNode struct {
 	// ---- Pending config change tracking (leader) ----
 	pendingConfigMu      sync.Mutex
 	pendingConfigApplied map[int]chan bool // logIndex -> chanApplied
+
+	// ---- Persistence tracking ----
+	lastPersistedSnapIdx int // LastIncludedIndex of the last persisted snapshot
 }
 
 // pendingApply is an in-flight client command waiting for a response.
@@ -337,6 +340,27 @@ func (n *RaftNode) HandleAddRemoveServer(args *types.AddRemoveServerArgs) *types
 	return resp
 }
 
+// ---- Persistence ---------------------------------------------------
+
+// persistState saves the current term, votedFor and log to stable storage.
+// Also persists the snapshot if it changed since the last save.
+// The Raft paper requires this before responding to any RPC that modifies
+// persistent state (currentTerm, votedFor, log[]).
+func (n *RaftNode) persistState() {
+	ps := n.state.getPersistentState()
+	if err := n.storage.SaveState(ps); err != nil {
+		log.Errorf("persistState: %v", err)
+	}
+	snap := n.state.getLastSnapshot()
+	if snap != nil && snap.LastIncludedIndex > n.lastPersistedSnapIdx {
+		if err := n.storage.SaveSnapshot(snap); err != nil {
+			log.Errorf("persistSnapshot: %v", err)
+		} else {
+			n.lastPersistedSnapIdx = snap.LastIncludedIndex
+		}
+	}
+}
+
 // ---- Main run loop ------------------------------------------------
 
 // run is the central Raft loop. It switches behaviour based on the node's role.
@@ -398,6 +422,8 @@ func (n *RaftNode) handleApplyRequests() {
 					req.resultCh <- &types.ApplyResponse{Success: false, LeaderID: n.cfg.ID}
 					continue
 				}
+				n.persistState()
+
 				// Register result channel for when the log is applied.
 				errCh := make(chan error, 1)
 				n.pendingMu.Lock()
@@ -426,14 +452,18 @@ func (n *RaftNode) handleFollower() {
 	case args := <-n.aeArgsChan:
 		n.state.stopElectionTimeout()
 		resp := n.state.handleAppendEntries(n.cfg.ID, args)
+		n.persistState()
 		n.aeReplyChan <- resp
 
 	case args := <-n.rvArgsChan:
 		n.state.stopElectionTimeout()
-		n.rvReplyChan <- n.state.handleRequestToVote(n.cfg.ID, args)
+		resp := n.state.handleRequestToVote(n.cfg.ID, args)
+		n.persistState()
+		n.rvReplyChan <- resp
 
 	case args := <-n.isArgsChan:
 		resp := n.state.handleInstallSnapshotRequest(n.cfg.ID, args)
+		n.persistState()
 		n.isReplyChan <- resp
 
 	case <-n.connectedChan:
@@ -445,8 +475,10 @@ func (n *RaftNode) handleFollower() {
 			return
 		}
 		n.state.startElection(n.cfg.ID)
+		n.persistState()
 		if len(n.cfg.Peers) == 0 {
 			n.state.winElection(n.cfg.ID)
+			n.persistState()
 		} else {
 			args := n.state.prepareRequestVoteRPC(n.cfg.ID)
 			n.sendRequestVoteRPCs(args)
@@ -466,24 +498,30 @@ func (n *RaftNode) handleCandidate() {
 	select {
 	case args := <-n.aeArgsChan:
 		resp := n.state.handleAppendEntries(n.cfg.ID, args)
+		n.persistState()
 		n.aeReplyChan <- resp
 
 	case args := <-n.rvArgsChan:
-		n.rvReplyChan <- n.state.handleRequestToVote(n.cfg.ID, args)
+		resp := n.state.handleRequestToVote(n.cfg.ID, args)
+		n.persistState()
+		n.rvReplyChan <- resp
 
 	case args := <-n.isArgsChan:
 		resp := n.state.handleInstallSnapshotRequest(n.cfg.ID, args)
+		n.persistState()
 		n.isReplyChan <- resp
 
 	case resp := <-n.myVoteResponseChan:
 		if won := n.state.updateElection(resp); won {
 			n.state.winElection(n.cfg.ID)
+			n.persistState()
 			n.sendAppendEntriesRPCs()
 		}
 
 	case <-timer.C:
 		n.state.stopElectionTimeout()
 		n.state.startElection(n.cfg.ID)
+		n.persistState()
 		args := n.state.prepareRequestVoteRPC(n.cfg.ID)
 		n.sendRequestVoteRPCs(args)
 
@@ -499,15 +537,19 @@ func (n *RaftNode) handleLeader() {
 	select {
 	case args := <-n.aeArgsChan:
 		resp := n.state.handleAppendEntries(n.cfg.ID, args)
+		n.persistState()
 		n.aeReplyChan <- resp
 
 	case args := <-n.rvArgsChan:
-		n.rvReplyChan <- n.state.handleRequestToVote(n.cfg.ID, args)
+		resp := n.state.handleRequestToVote(n.cfg.ID, args)
+		n.persistState()
+		n.rvReplyChan <- resp
 
 	case <-n.myVoteResponseChan: // drain
 
 	case args := <-n.isArgsChan:
 		resp := n.state.handleInstallSnapshotRequest(n.cfg.ID, args)
+		n.persistState()
 		n.isReplyChan <- resp
 
 	case <-n.connectedChan:
