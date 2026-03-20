@@ -69,6 +69,10 @@ type RaftNode struct {
 	// ---- Pending command tracking (leader) ----
 	pendingMu      sync.Mutex
 	pendingCommands map[int]chan error // logIndex -> result channel
+
+	// ---- Pending config change tracking (leader) ----
+	pendingConfigMu      sync.Mutex
+	pendingConfigApplied map[int]chan bool // logIndex -> chanApplied
 }
 
 // pendingApply is an in-flight client command waiting for a response.
@@ -143,9 +147,10 @@ func New(
 		snapshotResponseChan: snapshotRespChan,
 		snapshotInstallChan:  snapshotInstallChan,
 
-		connectedChan:   make(chan struct{}, 1),
-		stopCh:          make(chan struct{}),
-		pendingCommands: make(map[int]chan error),
+		connectedChan:        make(chan struct{}, 1),
+		stopCh:               make(chan struct{}),
+		pendingCommands:      make(map[int]chan error),
+		pendingConfigApplied: make(map[int]chan bool),
 	}
 
 	return n, nil
@@ -362,6 +367,10 @@ func (n *RaftNode) run() {
 func (n *RaftNode) checkConfigurationsToStart() {
 	ok, entry := n.state.handleNextConfigurationChange()
 	if ok {
+		logIdx := n.state.getLastConfigLogIndex()
+		n.pendingConfigMu.Lock()
+		n.pendingConfigApplied[logIdx] = entry.chanApplied
+		n.pendingConfigMu.Unlock()
 		go n.waitForConfigApplied(entry)
 	}
 }
