@@ -1,0 +1,7 @@
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/examples/kv-store/kv-store
