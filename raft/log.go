@@ -31,8 +31,9 @@ func (s *nodeState) addCommandLog(id types.ServerID, clientID string, seqNum int
 	}
 
 	if s.nextLogIdx >= logArrayCapacity {
-		// TODO: Session 4 — call takeSnapshot, check if space freed.
-		return -1
+		if !s.takeSnapshot() || s.nextLogIdx >= logArrayCapacity {
+			return -1
+		}
 	}
 
 	s.logs[s.nextLogIdx] = entry
@@ -174,8 +175,9 @@ func (s *nodeState) handleAppendEntries(myID types.ServerID, aea *types.AppendEn
 	// 3 & 4. Merge incoming entries.
 	startNext := prevLogArrIdx + 1
 	if startNext+len(aea.Entries) >= logArrayCapacity {
-		// TODO: Session 4 — attempt snapshot then purge.
-		return &types.AppendEntriesResponse{ID: myID, Term: s.currentTerm, Success: false, LastIndex: lastIdx}
+		if !s.takeSnapshot() || startNext+len(aea.Entries) >= logArrayCapacity {
+			return &types.AppendEntriesResponse{ID: myID, Term: s.currentTerm, Success: false, LastIndex: lastIdx}
+		}
 	}
 
 	for i, entry := range aea.Entries {
@@ -374,9 +376,18 @@ func (n *RaftNode) applyLog(entry types.RaftLog) {
 		} else {
 			n.pendingMu.Unlock()
 		}
-		// For configuration entries, unlock the config pipeline.
+		// For configuration entries, unlock the config pipeline and
+		// signal the caller waiting in waitForConfigApplied.
 		if entry.Type == types.LogConfiguration {
 			n.state.unlockNextConfiguration()
+			n.pendingConfigMu.Lock()
+			if ch, ok := n.pendingConfigApplied[entry.Index]; ok {
+				delete(n.pendingConfigApplied, entry.Index)
+				n.pendingConfigMu.Unlock()
+				ch <- true
+			} else {
+				n.pendingConfigMu.Unlock()
+			}
 		}
 	}
 }

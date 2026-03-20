@@ -25,8 +25,9 @@ func (s *nodeState) addConfigLog(leaderID types.ServerID, cfg types.ConfigChange
 	s.applyConfigurationLocked(lastIdx+1, cfg)
 
 	if s.nextLogIdx >= logArrayCapacity {
-		// TODO: Session 4 — attempt snapshot.
-		return false
+		if !s.takeSnapshot() || s.nextLogIdx >= logArrayCapacity {
+			return false
+		}
 	}
 
 	s.logs[s.nextLogIdx] = entry
@@ -183,7 +184,6 @@ func (s *nodeState) getUnvotingServerIDs() []types.ServerID {
 // ---- RaftNode configuration helpers --------------------------------
 
 // handleConfigurationMessages is the goroutine that processes membership RPCs.
-// TODO: Session 4 — implement full logic.
 func (n *RaftNode) handleConfigurationMessages() {
 	for {
 		select {
@@ -198,12 +198,21 @@ func (n *RaftNode) handleConfigurationMessages() {
 				log.Tracef("Leader received config change: add=%v server=%s",
 					req.msg.Add, req.msg.Server)
 				if req.msg.Add {
-					// The new server must catch up before being added to the config.
-					// TODO: Session 4 — connect to new server, track as unvoting.
+					// Connect to the new server so we can send it log entries.
+					if err := n.transport.Connect(req.msg.Server); err != nil {
+						log.Warnf("Connect to new server %s: %v", req.msg.Server, err)
+					}
+					n.state.addNewServer(req.msg.Server)
 					n.state.addUnvotingServer(req)
+					// Start replicating immediately so the new server catches up.
+					n.sendAppendEntriesRPCs()
 				} else {
 					ok, entry := n.state.handleConfigurationRPC(req)
 					if ok {
+						logIdx := n.state.getLastConfigLogIndex()
+						n.pendingConfigMu.Lock()
+						n.pendingConfigApplied[logIdx] = entry.chanApplied
+						n.pendingConfigMu.Unlock()
 						go n.waitForConfigApplied(entry)
 					}
 				}
@@ -230,7 +239,6 @@ func (n *RaftNode) waitForConfigApplied(entry configEntry) {
 
 // promoteUnvotingServer moves a caught-up joining server into the voting
 // configuration by adding it to the configQueue.
-// TODO: Session 4 — implement.
 func (n *RaftNode) promoteUnvotingServer(id types.ServerID) {
 	entry, found := n.state.removeUnvotingServer(id)
 	if !found {
@@ -238,6 +246,10 @@ func (n *RaftNode) promoteUnvotingServer(id types.ServerID) {
 	}
 	ok, conf := n.state.handleConfigurationRPC(entry)
 	if ok {
+		logIdx := n.state.getLastConfigLogIndex()
+		n.pendingConfigMu.Lock()
+		n.pendingConfigApplied[logIdx] = conf.chanApplied
+		n.pendingConfigMu.Unlock()
 		go n.waitForConfigApplied(conf)
 	}
 }
