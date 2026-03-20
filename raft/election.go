@@ -103,7 +103,6 @@ func (s *nodeState) updateElection(resp *types.RequestVoteResponse) bool {
 
 // winElection transitions the node to Leader, resets leader-only state,
 // and appends the mandatory no-op entry.
-// TODO: Session 2 — called by RaftNode after updateElection returns true.
 func (s *nodeState) winElection(id types.ServerID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

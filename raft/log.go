@@ -129,7 +129,6 @@ func (s *nodeState) getAppendEntriesArgs(id types.ServerID) *types.AppendEntries
 }
 
 // handleAppendEntries processes an incoming AppendEntries RPC (follower side).
-// TODO: Session 3 — full implementation.
 func (s *nodeState) handleAppendEntries(myID types.ServerID, aea *types.AppendEntriesArgs) *types.AppendEntriesResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()

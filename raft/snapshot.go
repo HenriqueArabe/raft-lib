@@ -61,7 +61,6 @@ func (s *nodeState) prepareInstallSnapshotRPC(leaderID types.ServerID) *types.In
 }
 
 // handleInstallSnapshotRequest applies an incoming snapshot from the leader.
-// TODO: Session 4 — full implementation.
 func (s *nodeState) handleInstallSnapshotRequest(myID types.ServerID, isa *types.InstallSnapshotArgs) *types.InstallSnapshotResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()

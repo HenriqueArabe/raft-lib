@@ -157,7 +157,6 @@ func New(
 }
 
 // Start initialises storage/transport and launches the Raft goroutines.
-// TODO: Session 5 — load persistent state, connect to peers.
 func (n *RaftNode) Start() error {
 	// Load persistent state from storage.
 	ps, err := n.storage.LoadState()
