@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	defaultDialTimeout    = 300 * time.Second
-	defaultRPCTimeout     = 200 * time.Millisecond
-	defaultRetryInterval  = 1 * time.Second
+	defaultDialTimeout   = 5 * time.Second
+	defaultRPCTimeout    = 200 * time.Millisecond
+	defaultRetryInterval = 1 * time.Second
 )
 
 // rpcConn wraps a single *rpc.Client connection to a peer.
@@ -25,7 +25,8 @@ type rpcConn struct {
 }
 
 // RPCTransport implements Transport using Go's standard net/rpc package.
-// RPCs are sent over HTTP/TCP to peer nodes.
+// Each instance uses its own HTTP mux and listener so multiple nodes can
+// coexist in the same process (useful for integration tests).
 type RPCTransport struct {
 	mu      sync.RWMutex
 	myID    types.ServerID
@@ -51,23 +52,36 @@ func (t *RPCTransport) RegisterHandler(h TransportHandler) {
 	t.handler = h
 }
 
-// Listen starts the RPC server on addr (e.g. "127.0.0.1:8001").
+// Addr returns the listener address, or nil if not yet listening.
+// Useful for tests that bind to ":0" and need the actual port.
+func (t *RPCTransport) Addr() net.Addr {
+	if t.listener != nil {
+		return t.listener.Addr()
+	}
+	return nil
+}
+
+// Listen starts the RPC server on addr (e.g. "127.0.0.1:8001" or ":0").
+// Each transport gets its own HTTP mux so multiple nodes can share a process.
 func (t *RPCTransport) Listen(addr string) error {
 	listener := &rpcListener{transport: t}
 
 	srv := rpc.NewServer()
-	if err := srv.Register(listener); err != nil {
+	if err := srv.RegisterName("RaftRPCListener", listener); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
 	}
-	srv.HandleHTTP(rpc.DefaultRPCPath+string(t.myID), rpc.DefaultDebugPath+string(t.myID))
+
+	// Dedicated mux per transport (avoids http.DefaultServeMux conflicts).
+	mux := http.NewServeMux()
+	mux.Handle(rpc.DefaultRPCPath, srv)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	t.listener = ln
-	log.Infof("RPCTransport: listening on %s", addr)
-	go http.Serve(ln, nil)
+	log.Infof("RPCTransport: listening on %s", ln.Addr())
+	go http.Serve(ln, mux)
 	return nil
 }
 
@@ -178,7 +192,7 @@ func (t *RPCTransport) SendAddRemoveServer(target types.ServerID, args *types.Ad
 	return &reply, nil
 }
 
-// call performs an asynchronous RPC with a deadline, reconnecting on failure.
+// call performs an asynchronous RPC with a deadline.
 func (t *RPCTransport) call(target types.ServerID, method string, args, reply interface{}, timeout time.Duration) error {
 	val, ok := t.connections.Load(target)
 	if !ok {
@@ -193,7 +207,6 @@ func (t *RPCTransport) call(target types.ServerID, method string, args, reply in
 	select {
 	case <-call.Done:
 		if call.Error != nil {
-			// Mark connection as stale so the caller can reconnect.
 			t.connections.Delete(target)
 			return call.Error
 		}
@@ -205,8 +218,8 @@ func (t *RPCTransport) call(target types.ServerID, method string, args, reply in
 
 // ---- inbound RPC listener ------------------------------------------
 
-// rpcListener is the object registered with net/rpc to receive inbound RPCs.
-// It dispatches calls to the TransportHandler (i.e., the RaftNode).
+// rpcListener is the object registered with net/rpc (via RegisterName) to
+// receive inbound RPCs. It dispatches calls to the TransportHandler.
 type rpcListener struct {
 	transport *RPCTransport
 }
