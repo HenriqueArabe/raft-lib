@@ -1,7 +1,8 @@
 package raft
 
 import (
-	log "github.com/sirupsen/logrus"
+	"fmt"
+	"log/slog"
 
 	"github.com/henrique-arab/raft-lib/types"
 )
@@ -34,8 +35,8 @@ func (s *nodeState) addConfigLog(leaderID types.ServerID, cfg types.ConfigChange
 	s.logHashes[s.nextLogIdx] = s.getLogHash(entry)
 	s.nextLogIdx++
 
-	log.Infof("State - add config log: idx=%d add=%v server=%s",
-		entry.Index, cfg.Add, cfg.Server)
+	slog.Info(fmt.Sprintf("State - add config log: idx=%d add=%v server=%s",
+		entry.Index, cfg.Add, cfg.Server))
 
 	s.matchIndex[leaderID] = entry.Index
 	s.lastSentLogIndex[leaderID] = entry.Index
@@ -63,7 +64,7 @@ func (s *nodeState) handleConfigurationRPC(entry configEntry) (bool, configEntry
 	s.mu.Lock()
 	s.configQueue = append(s.configQueue, entry)
 	s.pendingConfigs++
-	log.Tracef("Config queue size: %d", s.pendingConfigs)
+	slog.Debug(fmt.Sprintf("Config queue size: %d", s.pendingConfigs))
 	s.mu.Unlock()
 
 	return s.handleNextConfigurationChange()
@@ -90,7 +91,7 @@ func (s *nodeState) handleNextConfigurationChange() (bool, configEntry) {
 	// Pass "" here; addConfigLog will compute it using currentLeader.
 	s.addConfigLogUnlocked(s.currentLeader, entry.msg)
 
-	log.Tracef("Config queue remaining: %d", s.pendingConfigs)
+	slog.Debug(fmt.Sprintf("Config queue remaining: %d", s.pendingConfigs))
 	return true, entry
 }
 
@@ -110,8 +111,8 @@ func (s *nodeState) addConfigLogUnlocked(leaderID types.ServerID, cfg types.Conf
 	s.logs[s.nextLogIdx] = entry
 	s.logHashes[s.nextLogIdx] = s.getLogHash(entry)
 	s.nextLogIdx++
-	log.Infof("State - add config log: idx=%d add=%v server=%s",
-		entry.Index, cfg.Add, cfg.Server)
+	slog.Info(fmt.Sprintf("State - add config log: idx=%d add=%v server=%s",
+		entry.Index, cfg.Add, cfg.Server))
 	s.matchIndex[leaderID] = entry.Index
 	s.lastSentLogIndex[leaderID] = entry.Index
 	s.nextIndex[leaderID] = entry.Index + 1
@@ -195,12 +196,12 @@ func (n *RaftNode) handleConfigurationMessages() {
 					LeaderID: n.state.getCurrentLeader(),
 				}
 			case Leader:
-				log.Tracef("Leader received config change: add=%v server=%s",
-					req.msg.Add, req.msg.Server)
+				slog.Debug(fmt.Sprintf("Leader received config change: add=%v server=%s",
+					req.msg.Add, req.msg.Server))
 				if req.msg.Add {
 					// Connect to the new server so we can send it log entries.
 					if err := n.transport.Connect(req.msg.Server); err != nil {
-						log.Warnf("Connect to new server %s: %v", req.msg.Server, err)
+						slog.Warn(fmt.Sprintf("Connect to new server %s: %v", req.msg.Server, err))
 					}
 					n.state.addNewServer(req.msg.Server)
 					n.state.addUnvotingServer(req)

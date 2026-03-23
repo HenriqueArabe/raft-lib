@@ -25,11 +25,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/raft"
 	"github.com/henrique-arab/raft-lib/storage"
@@ -103,8 +102,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: kv-store -id <addr> -peers <addr1,addr2,...>")
 		os.Exit(1)
 	}
-
-	log.SetLevel(log.InfoLevel)
 
 	var peers []types.ServerID
 	if *peersStr != "" {

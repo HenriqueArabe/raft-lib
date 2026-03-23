@@ -1,9 +1,9 @@
 package raft
 
 import (
+	"fmt"
+	"log/slog"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/types"
 )
@@ -16,7 +16,7 @@ func (s *nodeState) startElection(id types.ServerID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.currentTerm++
-	log.Infof("Become Candidate: term=%d", s.currentTerm)
+	slog.Info(fmt.Sprintf("Become Candidate: term=%d", s.currentTerm))
 	s.role = Candidate
 	s.votedFor = id
 	s.electionVotes = 1
@@ -45,7 +45,7 @@ func (s *nodeState) handleRequestToVote(id types.ServerID, rva *types.RequestVot
 
 	// Deny if our term is newer.
 	if s.currentTerm > rva.Term {
-		log.Tracef("Reject vote: our term %d > candidate term %d", s.currentTerm, rva.Term)
+		slog.Debug(fmt.Sprintf("Reject vote: our term %d > candidate term %d", s.currentTerm, rva.Term))
 		return &types.RequestVoteResponse{ID: id, Term: s.currentTerm, VoteGranted: false}
 	}
 
@@ -62,15 +62,15 @@ func (s *nodeState) handleRequestToVote(id types.ServerID, rva *types.RequestVot
 
 	if canVote && logOK {
 		s.stopElectionTimeoutLocked()
-		log.Infof("Become Follower (handleRequestToVote): voted for %s", rva.CandidateID)
+		slog.Info(fmt.Sprintf("Become Follower (handleRequestToVote): voted for %s", rva.CandidateID))
 		s.role = Follower
 		s.votedFor = rva.CandidateID
 		s.currentLeader = rva.CandidateID
 		return &types.RequestVoteResponse{ID: id, Term: s.currentTerm, VoteGranted: true}
 	}
 
-	log.Tracef("Reject vote: votedFor=%s lastTerm=%d/%d lastIdx=%d/%d",
-		s.votedFor, lastTerm, rva.LastLogTerm, lastIdx, rva.LastLogIndex)
+	slog.Debug(fmt.Sprintf("Reject vote: votedFor=%s lastTerm=%d/%d lastIdx=%d/%d",
+		s.votedFor, lastTerm, rva.LastLogTerm, lastIdx, rva.LastLogIndex))
 	return &types.RequestVoteResponse{ID: id, Term: s.currentTerm, VoteGranted: false}
 }
 
@@ -85,7 +85,7 @@ func (s *nodeState) updateElection(resp *types.RequestVoteResponse) bool {
 		s.stopElectionTimeoutLocked()
 		s.electionVotes = 0
 		s.updateCurrentTerm(resp.Term)
-		log.Info("Become Follower (updateElection): stale term")
+		slog.Info("Become Follower (updateElection): stale term")
 		s.role = Follower
 		return false
 	}
@@ -93,7 +93,7 @@ func (s *nodeState) updateElection(resp *types.RequestVoteResponse) bool {
 	// Only count votes for the current term.
 	if resp.Term == s.currentTerm && resp.VoteGranted {
 		s.electionVotes++
-		log.Tracef("Election votes: %d / %d", s.electionVotes, len(s.serverConfig))
+		slog.Debug(fmt.Sprintf("Election votes: %d / %d", s.electionVotes, len(s.serverConfig)))
 		if s.electionVotes > len(s.serverConfig)/2 {
 			return true // caller must call winElection outside the lock
 		}
@@ -107,7 +107,7 @@ func (s *nodeState) winElection(id types.ServerID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log.Infof("Become Leader: term=%d", s.currentTerm)
+	slog.Info(fmt.Sprintf("Become Leader: term=%d", s.currentTerm))
 	lastIdx, _ := s.getLastLogIdxTerm()
 	s.electionVotes = 0
 	s.role = Leader
@@ -132,13 +132,13 @@ func (n *RaftNode) sendRequestVoteRPCs(args *types.RequestVoteArgs) {
 		go func() {
 			resp, err := n.transport.SendRequestVote(peer, args)
 			if err != nil {
-				log.Debugf("RequestVote to %s: %v", peer, err)
+				slog.Debug(fmt.Sprintf("RequestVote to %s: %v", peer, err))
 				return
 			}
 			select {
 			case n.myVoteResponseChan <- resp:
 			case <-time.After(time.Duration(n.cfg.ElectionMinMs) * time.Millisecond):
-				log.Warnf("RequestVote response from %s not consumed", peer)
+				slog.Warn(fmt.Sprintf("RequestVote response from %s not consumed", peer))
 			case <-n.stopCh:
 			}
 		}()

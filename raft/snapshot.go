@@ -1,7 +1,8 @@
 package raft
 
 import (
-	log "github.com/sirupsen/logrus"
+	"fmt"
+	"log/slog"
 
 	"github.com/henrique-arab/raft-lib/types"
 )
@@ -24,10 +25,10 @@ func (s *nodeState) takeSnapshot() bool {
 		return false
 	}
 
-	log.Tracef("Taking snapshot: arr=%d idx=%d term=%d",
+	slog.Debug(fmt.Sprintf("Taking snapshot: arr=%d idx=%d term=%d",
 		lastAppliedArrIdx,
 		s.logs[lastAppliedArrIdx].Index,
-		s.logs[lastAppliedArrIdx].Term)
+		s.logs[lastAppliedArrIdx].Term))
 
 	snap := &types.Snapshot{
 		LastIncludedIndex: s.logs[lastAppliedArrIdx].Index,
@@ -65,7 +66,7 @@ func (s *nodeState) handleInstallSnapshotRequest(myID types.ServerID, isa *types
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log.Trace("Received InstallSnapshot request")
+	slog.Debug("Received InstallSnapshot request")
 
 	if isa.Term < s.currentTerm {
 		return &types.InstallSnapshotResponse{
@@ -103,7 +104,7 @@ func (s *nodeState) handleInstallSnapshotRequest(myID types.ServerID, isa *types
 	// Signal the RaftNode to restore the state machine from the snapshot.
 	s.snapshotInstallChan <- isa.Data
 
-	log.Tracef("State: installed snapshot idx=%d", isa.LastIncludedIndex)
+	slog.Debug(fmt.Sprintf("State: installed snapshot idx=%d", isa.LastIncludedIndex))
 	return &types.InstallSnapshotResponse{
 		ID:                myID,
 		Term:              s.currentTerm,
@@ -121,7 +122,7 @@ func (s *nodeState) handleInstallSnapshotResponse(myID types.ServerID, isr *type
 
 	if !isr.Success {
 		if isr.Term >= s.currentTerm {
-			log.Info("Become Follower (handleInstallSnapshotResponse)")
+			slog.Info("Become Follower (handleInstallSnapshotResponse)")
 			s.role = Follower
 			s.updateCurrentTerm(isr.Term)
 			s.currentLeader = isr.ID
@@ -169,7 +170,7 @@ func (n *RaftNode) sendInstallSnapshotRPC(target types.ServerID) {
 	go func() {
 		resp, err := n.transport.SendInstallSnapshot(target, args)
 		if err != nil {
-			log.Debugf("InstallSnapshot to %s: %v", target, err)
+			slog.Debug(fmt.Sprintf("InstallSnapshot to %s: %v", target, err))
 			return
 		}
 		select {
@@ -206,7 +207,7 @@ func (n *RaftNode) snapshotLoop() {
 			// State machine snapshot requested by takeSnapshot().
 			data, err := n.sm.Snapshot()
 			if err != nil {
-				log.Errorf("StateMachine.Snapshot error: %v", err)
+				slog.Error(fmt.Sprintf("StateMachine.Snapshot error: %v", err))
 				n.snapshotResponseChan <- nil
 			} else {
 				n.snapshotResponseChan <- data
@@ -214,7 +215,7 @@ func (n *RaftNode) snapshotLoop() {
 		case data := <-n.snapshotInstallChan:
 			// Restore from a snapshot installed by the leader.
 			if err := n.sm.Restore(data); err != nil {
-				log.Errorf("StateMachine.Restore error: %v", err)
+				slog.Error(fmt.Sprintf("StateMachine.Restore error: %v", err))
 			}
 		case <-n.stopCh:
 			return

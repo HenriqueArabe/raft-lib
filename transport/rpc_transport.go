@@ -2,13 +2,12 @@ package transport
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/rpc"
 	"sync"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/types"
 )
@@ -80,7 +79,7 @@ func (t *RPCTransport) Listen(addr string) error {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	t.listener = ln
-	log.Infof("RPCTransport: listening on %s", ln.Addr())
+	slog.Info(fmt.Sprintf("RPCTransport: listening on %s", ln.Addr()))
 	go http.Serve(ln, mux)
 	return nil
 }
@@ -95,7 +94,7 @@ func (t *RPCTransport) Connect(id types.ServerID) error {
 		return fmt.Errorf("dial %s: %w", id, err)
 	}
 	t.connections.Store(id, rpcConn{client: client})
-	log.Infof("RPCTransport: connected to %s", id)
+	slog.Info(fmt.Sprintf("RPCTransport: connected to %s", id))
 	return nil
 }
 
@@ -105,7 +104,7 @@ func (t *RPCTransport) ConnectWithRetry(id types.ServerID, done chan<- types.Ser
 	go func() {
 		for {
 			if err := t.Connect(id); err != nil {
-				log.Debugf("RPCTransport: retry connect to %s: %v", id, err)
+				slog.Debug(fmt.Sprintf("RPCTransport: retry connect to %s: %v", id, err))
 				time.Sleep(defaultRetryInterval)
 				continue
 			}

@@ -2,10 +2,9 @@ package raft
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/types"
 )
@@ -40,8 +39,8 @@ func (s *nodeState) addCommandLog(id types.ServerID, clientID string, seqNum int
 	s.logHashes[s.nextLogIdx] = s.getLogHash(entry)
 	s.nextLogIdx++
 
-	log.Infof("State - add command log: idx=%d term=%d hash=%x",
-		entry.Index, entry.Term, s.logHashes[s.nextLogIdx-1])
+	slog.Info(fmt.Sprintf("State - add command log: idx=%d term=%d hash=%x",
+		entry.Index, entry.Term, s.logHashes[s.nextLogIdx-1]))
 
 	s.matchIndex[id] = entry.Index
 	s.lastSentLogIndex[id] = entry.Index
@@ -65,7 +64,7 @@ func (s *nodeState) addNoopLogLocked(id types.ServerID) {
 	s.logHashes[s.nextLogIdx] = s.getLogHash(entry)
 	s.nextLogIdx++
 
-	log.Infof("State - add noop log: idx=%d term=%d", entry.Index, entry.Term)
+	slog.Info(fmt.Sprintf("State - add noop log: idx=%d term=%d", entry.Index, entry.Term))
 	s.matchIndex[id] = entry.Index
 	s.lastSentLogIndex[id] = entry.Index
 	s.nextIndex[id] = entry.Index + 1
@@ -112,8 +111,8 @@ func (s *nodeState) getAppendEntriesArgs(id types.ServerID) *types.AppendEntries
 
 	if len(logsToSend) > 0 {
 		s.lastSentLogIndex[id] = logsToSend[len(logsToSend)-1].Index
-		log.Tracef("Sending %d logs to %s (start=%d end=%d)",
-			len(logsToSend), id, logsToSend[0].Index, logsToSend[len(logsToSend)-1].Index)
+		slog.Debug(fmt.Sprintf("Sending %d logs to %s (start=%d end=%d)",
+			len(logsToSend), id, logsToSend[0].Index, logsToSend[len(logsToSend)-1].Index))
 	} else {
 		s.lastSentLogIndex[id] = serverNextIdx - 1
 	}
@@ -148,7 +147,7 @@ func (s *nodeState) handleAppendEntries(myID types.ServerID, aea *types.AppendEn
 	// Step down from Candidate or Leader.
 	if s.role == Candidate || s.role == Leader {
 		s.stopElectionTimeoutLocked()
-		log.Info("Become Follower (handleAppendEntries)")
+		slog.Info("Become Follower (handleAppendEntries)")
 		s.role = Follower
 	}
 
@@ -185,8 +184,8 @@ func (s *nodeState) handleAppendEntries(myID types.ServerID, aea *types.AppendEn
 			s.logs[pos] = entry
 			s.nextLogIdx = pos + 1
 			s.logHashes[pos] = s.getLogHash(entry)
-			log.Infof("State - add raft log: idx=%d term=%d hash=%x",
-				entry.Index, entry.Term, fmt.Sprintf("%x", s.logHashes[pos]))
+			slog.Info(fmt.Sprintf("State - add raft log: idx=%d term=%d hash=%x",
+				entry.Index, entry.Term, s.logHashes[pos]))
 			if entry.Type == types.LogConfiguration {
 				s.applyConfigurationLocked(pos, entry.Config)
 			}
@@ -228,7 +227,7 @@ func (s *nodeState) handleAppendEntriesResponse(myID types.ServerID, aer *types.
 
 	if !aer.Success {
 		if aer.Term > s.currentTerm {
-			log.Info("Become Follower (handleAppendEntriesResponse)")
+			slog.Info("Become Follower (handleAppendEntriesResponse)")
 			s.role = Follower
 			s.updateCurrentTerm(aer.Term)
 			s.currentLeader = aer.ID
@@ -284,8 +283,8 @@ func (s *nodeState) updateLastApplied() int {
 	if arrIdx >= 0 {
 		s.lastApplied++
 	}
-	log.Tracef("State: updateLastApplied log=%d arr=%d commit=%d",
-		s.lastApplied, arrIdx, s.commitIndex)
+	slog.Debug(fmt.Sprintf("State: updateLastApplied log=%d arr=%d commit=%d",
+		s.lastApplied, arrIdx, s.commitIndex))
 	return arrIdx
 }
 
@@ -311,13 +310,13 @@ func (n *RaftNode) sendAppendEntriesRPCs() {
 		go func() {
 			resp, err := n.transport.SendAppendEntries(peer, args)
 			if err != nil {
-				log.Debugf("AppendEntries to %s: %v", peer, err)
+				slog.Debug(fmt.Sprintf("AppendEntries to %s: %v", peer, err))
 				return
 			}
 			select {
 			case n.myAEResponseChan <- resp:
 			case <-time.After(aeTimeout):
-				log.Warnf("AppendEntries response from %s not consumed (timeout)", peer)
+				slog.Warn(fmt.Sprintf("AppendEntries response from %s not consumed (timeout)", peer))
 			case <-n.stopCh:
 			}
 		}()
@@ -355,10 +354,10 @@ func (n *RaftNode) handleAppendEntriesRPCResponses() {
 
 // applyLog sends a committed log entry to the state machine.
 func (n *RaftNode) applyLog(entry types.RaftLog) {
-	log.Infof("Raft apply log: idx=%d type=%d", entry.Index, entry.Type)
+	slog.Info(fmt.Sprintf("Raft apply log: idx=%d type=%d", entry.Index, entry.Type))
 	if entry.Type == types.LogCommand {
 		if err := n.sm.Apply(entry.Data); err != nil {
-			log.Errorf("StateMachine.Apply error: %v", err)
+			slog.Error(fmt.Sprintf("StateMachine.Apply error: %v", err))
 		}
 		// Update deduplication tracking so replayed requests are detected.
 		if entry.ClientID != "" && entry.SeqNum > 0 {

@@ -6,10 +6,9 @@ package raft
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/henrique-arab/raft-lib/storage"
 	"github.com/henrique-arab/raft-lib/transport"
@@ -224,7 +223,7 @@ func (n *RaftNode) Start() error {
 	go n.snapshotLoop()
 	go n.run()
 
-	log.Infof("RaftNode %s started (peers=%v)", n.cfg.ID, n.cfg.Peers)
+	slog.Info(fmt.Sprintf("RaftNode %s started (peers=%v)", n.cfg.ID, n.cfg.Peers))
 	return nil
 }
 
@@ -233,7 +232,7 @@ func (n *RaftNode) Stop() {
 	n.once.Do(func() {
 		close(n.stopCh)
 		n.transport.Close()
-		log.Infof("RaftNode %s stopped", n.cfg.ID)
+		slog.Info(fmt.Sprintf("RaftNode %s stopped", n.cfg.ID))
 	})
 }
 
@@ -349,12 +348,12 @@ func (n *RaftNode) HandleAddRemoveServer(args *types.AddRemoveServerArgs) *types
 func (n *RaftNode) persistState() {
 	ps := n.state.getPersistentState()
 	if err := n.storage.SaveState(ps); err != nil {
-		log.Errorf("persistState: %v", err)
+		slog.Error(fmt.Sprintf("persistState: %v", err))
 	}
 	snap := n.state.getLastSnapshot()
 	if snap != nil && snap.LastIncludedIndex > n.lastPersistedSnapIdx {
 		if err := n.storage.SaveSnapshot(snap); err != nil {
-			log.Errorf("persistSnapshot: %v", err)
+			slog.Error(fmt.Sprintf("persistSnapshot: %v", err))
 		} else {
 			n.lastPersistedSnapIdx = snap.LastIncludedIndex
 		}
@@ -579,11 +578,11 @@ func (n *RaftNode) connectToPeers() {
 				default:
 				}
 				if err := n.transport.Connect(peer); err != nil {
-					log.Debugf("Connect to %s: %v — retrying", peer, err)
+					slog.Debug(fmt.Sprintf("Connect to %s: %v — retrying", peer, err))
 					time.Sleep(time.Second)
 					continue
 				}
-				log.Infof("Connected to peer %s", peer)
+				slog.Info(fmt.Sprintf("Connected to peer %s", peer))
 				done <- struct{}{}
 				return
 			}
