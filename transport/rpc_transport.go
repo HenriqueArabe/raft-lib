@@ -230,31 +230,51 @@ func (l *rpcListener) handler() TransportHandler {
 }
 
 func (l *rpcListener) RequestVoteRPC(args *types.RequestVoteArgs, reply *types.RequestVoteResponse) error {
-	resp := l.handler().HandleRequestVote(args)
+	h := l.handler()
+	if h == nil {
+		return fmt.Errorf("handler not registered")
+	}
+	resp := h.HandleRequestVote(args)
 	*reply = *resp
 	return nil
 }
 
 func (l *rpcListener) AppendEntriesRPC(args *types.AppendEntriesArgs, reply *types.AppendEntriesResponse) error {
-	resp := l.handler().HandleAppendEntries(args)
+	h := l.handler()
+	if h == nil {
+		return fmt.Errorf("handler not registered")
+	}
+	resp := h.HandleAppendEntries(args)
 	*reply = *resp
 	return nil
 }
 
 func (l *rpcListener) InstallSnapshotRPC(args *types.InstallSnapshotArgs, reply *types.InstallSnapshotResponse) error {
-	resp := l.handler().HandleInstallSnapshot(args)
+	h := l.handler()
+	if h == nil {
+		return fmt.Errorf("handler not registered")
+	}
+	resp := h.HandleInstallSnapshot(args)
 	*reply = *resp
 	return nil
 }
 
 func (l *rpcListener) ApplyRPC(args *types.ApplyArgs, reply *types.ApplyResponse) error {
-	resp := l.handler().HandleApply(args)
+	h := l.handler()
+	if h == nil {
+		return fmt.Errorf("handler not registered")
+	}
+	resp := h.HandleApply(args)
 	*reply = *resp
 	return nil
 }
 
 func (l *rpcListener) AddRemoveServerRPC(args *types.AddRemoveServerArgs, reply *types.AddRemoveServerResponse) error {
-	resp := l.handler().HandleAddRemoveServer(args)
+	h := l.handler()
+	if h == nil {
+		return fmt.Errorf("handler not registered")
+	}
+	resp := h.HandleAddRemoveServer(args)
 	*reply = *resp
 	return nil
 }
