@@ -355,6 +355,7 @@ func (n *RaftNode) handleAppendEntriesRPCResponses() {
 // applyLog sends a committed log entry to the state machine.
 func (n *RaftNode) applyLog(entry types.RaftLog) {
 	slog.Info(fmt.Sprintf("Raft apply log: idx=%d type=%d", entry.Index, entry.Type))
+	n.metrics.recordCommit()
 	if entry.Type == types.LogCommand {
 		if err := n.sm.Apply(entry.Data); err != nil {
 			slog.Error(fmt.Sprintf("StateMachine.Apply error: %v", err))

@@ -75,6 +75,10 @@ type RaftNode struct {
 
 	// ---- Persistence tracking ----
 	lastPersistedSnapIdx int // LastIncludedIndex of the last persisted snapshot
+
+	// ---- Metrics ----
+	metrics          *Metrics
+	electionStarted  time.Time // when the current election began
 }
 
 // pendingApply is an in-flight client command waiting for a response.
@@ -153,6 +157,7 @@ func New(
 		stopCh:               make(chan struct{}),
 		pendingCommands:      make(map[int]chan error),
 		pendingConfigApplied: make(map[int]chan bool),
+		metrics:              newMetrics(),
 	}
 
 	return n, nil
@@ -240,6 +245,7 @@ func (n *RaftNode) Stop() {
 // Blocks until the command is committed and applied (or the node is stopped).
 // Returns an error if this node is not the leader (includes the leader's address).
 func (n *RaftNode) Apply(clientID string, seqNum int64, command []byte) (*types.ApplyResponse, error) {
+	start := time.Now()
 	resultCh := make(chan *types.ApplyResponse, 1)
 	req := pendingApply{
 		args: types.ApplyArgs{
@@ -256,10 +262,18 @@ func (n *RaftNode) Apply(clientID string, seqNum int64, command []byte) (*types.
 	}
 	select {
 	case resp := <-resultCh:
+		if resp.Success {
+			n.metrics.recordApply(time.Since(start))
+		}
 		return resp, nil
 	case <-n.stopCh:
 		return nil, fmt.Errorf("node stopped")
 	}
+}
+
+// Metrics returns the node's performance counters.
+func (n *RaftNode) Metrics() *Metrics {
+	return n.metrics
 }
 
 // AddServer requests that server be added to the cluster.
@@ -473,10 +487,13 @@ func (n *RaftNode) handleFollower() {
 		if !n.connected {
 			return
 		}
+		n.electionStarted = time.Now()
 		n.state.startElection(n.cfg.ID)
 		n.persistState()
 		if len(n.cfg.Peers) == 0 {
 			n.state.winElection(n.cfg.ID)
+			n.metrics.recordElection(time.Since(n.electionStarted))
+			n.metrics.recordLeaderStart()
 			n.persistState()
 		} else {
 			args := n.state.prepareRequestVoteRPC(n.cfg.ID)
@@ -513,12 +530,15 @@ func (n *RaftNode) handleCandidate() {
 	case resp := <-n.myVoteResponseChan:
 		if won := n.state.updateElection(resp); won {
 			n.state.winElection(n.cfg.ID)
+			n.metrics.recordElection(time.Since(n.electionStarted))
+			n.metrics.recordLeaderStart()
 			n.persistState()
 			n.sendAppendEntriesRPCs()
 		}
 
 	case <-timer.C:
 		n.state.stopElectionTimeout()
+		n.electionStarted = time.Now()
 		n.state.startElection(n.cfg.ID)
 		n.persistState()
 		args := n.state.prepareRequestVoteRPC(n.cfg.ID)
