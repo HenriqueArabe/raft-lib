@@ -198,7 +198,7 @@ fmt.Println("Committed entries:", m.CommittedEntries())
 go test ./... -v
 ```
 
-A suíte inclui 18 testes cobrindo:
+A suíte inclui 21 testes cobrindo:
 
 - Eleição de líder (3 testes)
 - Replicação de log (4 testes)
@@ -207,6 +207,7 @@ A suíte inclui 18 testes cobrindo:
 - Integração TCP (2 testes)
 - Persistência e recuperação (1 teste)
 - Cenários (leader crash, follower reject) (3 testes)
+- Métricas (3 testes)
 
 ## Exemplo Completo
 
