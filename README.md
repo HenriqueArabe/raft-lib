@@ -93,10 +93,10 @@ func (kv *KVSM) Restore(snapshot []byte) error {
 
 ```go
 import (
-    "github.com/henrique-arab/raft-lib/raft"
-    "github.com/henrique-arab/raft-lib/storage"
-    "github.com/henrique-arab/raft-lib/transport"
-    "github.com/henrique-arab/raft-lib/types"
+    "github.com/HenriqueArabe/raft-lib/raft"
+    "github.com/HenriqueArabe/raft-lib/storage"
+    "github.com/HenriqueArabe/raft-lib/transport"
+    "github.com/HenriqueArabe/raft-lib/types"
 )
 
 cfg := types.Config{
