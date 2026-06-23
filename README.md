@@ -32,7 +32,7 @@ O pacote `raft` importa `types`, `transport` e `storage`. Não há importações
 ## Instalação
 
 ```bash
-go get github.com/henrique-arab/raft-lib
+go get github.com/HenriqueArabe/raft-lib
 ```
 
 Requer Go 1.21 ou superior.
